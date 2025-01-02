@@ -4,73 +4,72 @@ import os
 import asyncio
 from typing import Optional, NoReturn
 import google.generativeai as genai
+from rich.console import Console
+from rich.markdown import Markdown
+from rich.theme import Theme
 from utils.config import ConfigManager
 
 os.environ["GRPC_VERBOSITY"] = "ERROR"
 os.environ["GLOG_minloglevel"] = "2"
 
-
 class AskyAI:
-    """Класс для работы с Google Gemini AI"""
-
-    MODEL_NAME = 'gemini-2.0-flash-exp'  # Исправлено название модели
+    MODEL_NAME = 'gemini-2.0-flash-exp'
 
     def __init__(self) -> None:
         self.config_manager = ConfigManager()
         self.api_key = self._initialize_api()
         self.model = self._setup_model()
+        self.console = Console(theme=Theme({
+            "info": "cyan",
+            "warning": "yellow",
+            "error": "red"
+        }))
 
     def _initialize_api(self) -> str:
-        """Инициализация API ключа"""
         api_key = self.config_manager.get_api_key()
         if not api_key:
-            self._exit_with_error(
-                "API key is not configured. Use --set-api-key to set it.")
+            self._exit_with_error("API key is not configured. Use --set-api-key to set it.")
         genai.configure(api_key=api_key, transport="grpc")
         return api_key
 
     def _setup_model(self) -> genai.GenerativeModel:
-        """Настройка модели Gemini"""
         try:
             return genai.GenerativeModel(self.MODEL_NAME)
         except Exception as e:
             self._exit_with_error(f"Model initialization error: {e}")
 
-    def ask_question(self, question: str) -> str:  # Убран async
-        """
-        Отправляет вопрос к API Gemini и получает ответ
-
-        Args:
-            question: Текст вопроса
-
-        Returns:
-            str: Ответ от AI
-        """
+    def ask_question(self, question: str) -> str:
         try:
-            response = self.model.generate_content(question)  # Убран await
+            response = self.model.generate_content(question)
             if not response.text:
                 return "Received empty response from AI"
             return response.text
         except Exception as e:
             return f"Error receiving response: {str(e)}"
 
+    def display_response(self, response: str) -> None:
+        """Отображает ответ с поддержкой Markdown"""
+        try:
+            markdown = Markdown(response, code_theme="monokai")
+            self.console.print(markdown)
+        except Exception as e:
+            self.console.print(f"Error formatting response: {e}", style="error")
+
     @staticmethod
     def _exit_with_error(message: str) -> NoReturn:
-        """Выход из программы с сообщением об ошибке"""
-        print(message, file=sys.stderr)
+        console = Console(stderr=True)
+        console.print(f"[error]{message}[/error]")
         sys.exit(1)
 
 
 class ArgumentParser:
-    """Класс для обработки аргументов командной строки"""
-
     def __init__(self) -> None:
         self.parser = self._create_parser()
+        self.console = Console()
 
     def _create_parser(self) -> argparse.ArgumentParser:
-        """Создание и настройка парсера аргументов"""
         parser = argparse.ArgumentParser(
-            description="AskY: Your Console AI Assistant",
+            description="[bold cyan]AskY: Your Console AI Assistant[/bold cyan]",
             formatter_class=argparse.RawDescriptionHelpFormatter,
             epilog="Example usage:\n"
                    "  %(prog)s --set-api-key YOUR_API_KEY\n"
@@ -85,38 +84,34 @@ class ArgumentParser:
 
         parser.add_argument(
             'question',
-            nargs='?',  # Делаем аргумент опциональным
+            nargs='?',
             help='Question for AI (if not specified --set-api-key)'
         )
 
         return parser
 
     def parse_args(self) -> argparse.Namespace:
-        """Разбор аргументов командной строки"""
         args = self.parser.parse_args()
-
-        # Проверяем, что указан хотя бы один из аргументов
         if not args.set_api_key and not args.question:
-            self.parser.print_help()
+            self.print_help()
             sys.exit(1)
-
         return args
 
     def print_help(self) -> None:
-        """Вывод справки"""
-        self.parser.print_help()
+        help_text = self.parser.format_help()
+        self.console.print(Markdown(help_text))
 
 
 async def main() -> None:
-    """Основная функция программы"""
     arg_parser = ArgumentParser()
     args = arg_parser.parse_args()
     config_manager = ConfigManager()
+    console = Console()
 
     try:
         if args.set_api_key:
             config_manager.set_api_key(args.set_api_key)
-            print("API key saved successfully")
+            console.print("[green]API key saved successfully[/green]")
             return
 
         if not args.question:
@@ -124,14 +119,14 @@ async def main() -> None:
             sys.exit(1)
 
         ai = AskyAI()
-        response = ai.ask_question(args.question)  # Убран await
-        print(response)
+        response = ai.ask_question(args.question)
+        ai.display_response(response)
 
     except KeyboardInterrupt:
-        print("\nOperation interrupted by user")
+        console.print("\n[yellow]Operation interrupted by user[/yellow]")
         sys.exit(130)
     except Exception as e:
-        print(f"Error: {e}", file=sys.stderr)
+        console.print(f"[red]Error: {e}[/red]", stderr=True)
         sys.exit(1)
 
 
